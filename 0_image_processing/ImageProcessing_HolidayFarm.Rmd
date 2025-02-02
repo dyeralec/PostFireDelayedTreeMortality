@@ -1,0 +1,458 @@
+---
+title: "Image Processing - Holiday Farm"
+subtitle: "Geography Masters Thesis"
+author: "Alec Dyer"
+date: "January 11, 2024"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r message=F, include=F}
+library(dplyr)
+library(raster)
+library(terra)
+library(sf)
+library(rgdal)
+library(here)
+library(parallel)
+source('image_functions.R')
+```
+
+
+```{r}
+name <- 'HolidayFarm'
+name.1 <- 'HolidayFarm_1km_Oct2020'
+name.2 <- 'HolidayFarm_1km_June2021'
+name.3 <- 'HolidayFarm_1km_June2022'
+name.4 <- 'HolidayFarm_1km_June2023'
+```
+
+# Data 
+
+```{r message=F, echo=F}
+# read in all bands of the PS imagery as a raster stack
+ps.post.1 <- rast(here(paste("imagery/", name.1, ".tif", sep=''))) 
+ps.post.2 <- rast(here(paste("imagery/", name.2, ".tif", sep=''))) 
+ps.post.3 <- rast(here(paste("imagery/", name.3, ".tif", sep=''))) 
+ps.post.4 <- rast(here(paste("imagery/", name.4, ".tif", sep=''))) 
+```
+
+```{r message=F, echo=F}
+# read in pts shapefile for seudo Invariant Features (PIF)
+pts.nb <- vect(here(paste('samples/', tolower(name),'_pif.shp', sep=''))) %>% 
+  geom(df=TRUE) %>% 
+  tidyterra::select(x, y)
+
+# normalize post 1, 2, and 4 using post 3 as a baseline
+ps.post.1.norm <- relNormalizeMB_terra(ps.post.1, ps.post.3, pts.nb, 4)
+gc()
+ps.post.2.norm <- relNormalizeMB_terra(ps.post.2, ps.post.3, pts.nb, 4)
+gc()
+ps.post.4.norm <- relNormalizeMB_terra(ps.post.4, ps.post.3, pts.nb, 4)
+gc()
+```
+
+```{r}
+# replace with normalized imagery
+ps.post.1 <- ps.post.1.norm %>% rast()
+ps.post.2 <- ps.post.2.norm %>% rast()
+ps.post.4 <- ps.post.4.norm %>% rast()
+# remove unneeded objects
+remove(ps.post.1.norm, ps.post.2.norm, ps.post.4.norm)
+gc()
+```
+
+```{r}
+ps.post.1.s <- rescaleTerra(ps.post.1)
+gc()
+ps.post.2.s <- rescaleTerra(ps.post.2)
+gc()
+ps.post.3.s <- rescaleTerra(ps.post.3)
+gc()
+ps.post.4.s <- rescaleTerra(ps.post.4)
+gc()
+```
+
+```{r}
+# Get split boundaries
+ps.split <- vect(here(paste('boundaries/', tolower(name),'_split_8.shp', sep='')))
+```
+
+## Local Minima
+
+```{r}
+# split imagery into two
+ps.post.a <- crop(ps.post.1, buffer(ps.split[1], 45, capstyle='square'))
+ps.post.b <- crop(ps.post.1, buffer(ps.split[2], 45, capstyle='square'))
+ps.post.c <- crop(ps.post.1, buffer(ps.split[3], 45, capstyle='square'))
+ps.post.d <- crop(ps.post.1, buffer(ps.split[4], 45, capstyle='square'))
+ps.post.e <- crop(ps.post.1, buffer(ps.split[5], 45, capstyle='square'))
+ps.post.f <- crop(ps.post.1, buffer(ps.split[6], 45, capstyle='square'))
+ps.post.g <- crop(ps.post.1, buffer(ps.split[7], 45, capstyle='square'))
+ps.post.h <- crop(ps.post.1, buffer(ps.split[8], 45, capstyle='square'))
+
+
+lm.post.a <- calc_local_minima_terra_parallel(ps.post.a, n.cores=4)
+gc()
+lm.post.b <- calc_local_minima_terra_parallel(ps.post.b, n.cores=4)
+gc()
+lm.post.c <- calc_local_minima_terra_parallel(ps.post.c, n.cores=4)
+gc()
+lm.post.d <- calc_local_minima_terra_parallel(ps.post.d, n.cores=4)
+gc()
+lm.post.e <- calc_local_minima_terra_parallel(ps.post.e, n.cores=4)
+gc()
+lm.post.f <- calc_local_minima_terra_parallel(ps.post.f, n.cores=4)
+gc()
+lm.post.g <- calc_local_minima_terra_parallel(ps.post.g, n.cores=4)
+gc()
+lm.post.h <- calc_local_minima_terra_parallel(ps.post.h, n.cores=4)
+gc()
+
+lm.1 <- mosaic(lm.post.a, lm.post.b, lm.post.c, lm.post.d, lm.post.e, lm.post.f, lm.post.g, lm.post.h, fun=max)
+
+remove(lm.post.a, lm.post.b, lm.post.c, lm.post.d, lm.post.e, lm.post.f, lm.post.g, lm.post.h)
+```
+
+
+```{r}
+# split imagery into two
+ps.post.a <- crop(ps.post.2, buffer(ps.split[1], 45, capstyle='square'))
+ps.post.b <- crop(ps.post.2, buffer(ps.split[2], 45, capstyle='square'))
+ps.post.c <- crop(ps.post.2, buffer(ps.split[3], 45, capstyle='square'))
+ps.post.d <- crop(ps.post.2, buffer(ps.split[4], 45, capstyle='square'))
+ps.post.e <- crop(ps.post.2, buffer(ps.split[5], 45, capstyle='square'))
+ps.post.f <- crop(ps.post.2, buffer(ps.split[6], 45, capstyle='square'))
+ps.post.g <- crop(ps.post.2, buffer(ps.split[7], 45, capstyle='square'))
+ps.post.h <- crop(ps.post.2, buffer(ps.split[8], 45, capstyle='square'))
+
+lm.post.a <- calc_local_minima_terra_parallel(ps.post.a, n.cores=4)
+gc()
+lm.post.b <- calc_local_minima_terra_parallel(ps.post.b, n.cores=4)
+gc()
+lm.post.c <- calc_local_minima_terra_parallel(ps.post.c, n.cores=4)
+gc()
+lm.post.d <- calc_local_minima_terra_parallel(ps.post.d, n.cores=4)
+gc()
+lm.post.e <- calc_local_minima_terra_parallel(ps.post.e, n.cores=4)
+gc()
+lm.post.f <- calc_local_minima_terra_parallel(ps.post.f, n.cores=4)
+gc()
+lm.post.g <- calc_local_minima_terra_parallel(ps.post.g, n.cores=4)
+gc()
+lm.post.h <- calc_local_minima_terra_parallel(ps.post.h, n.cores=4)
+gc()
+
+lm.2 <- mosaic(lm.post.a, lm.post.b, lm.post.c, lm.post.d, lm.post.e, lm.post.f, lm.post.g, lm.post.h, fun=max)
+
+remove(lm.post.a, lm.post.b, lm.post.c, lm.post.d, lm.post.e, lm.post.f, lm.post.g, lm.post.h)
+```
+
+```{r}
+# split imagery
+ps.post.a <- crop(ps.post.3, buffer(ps.split[1], 45, capstyle='square'))
+ps.post.b <- crop(ps.post.3, buffer(ps.split[2], 45, capstyle='square'))
+ps.post.c <- crop(ps.post.3, buffer(ps.split[3], 45, capstyle='square'))
+ps.post.d <- crop(ps.post.3, buffer(ps.split[4], 45, capstyle='square'))
+ps.post.e <- crop(ps.post.3, buffer(ps.split[5], 45, capstyle='square'))
+ps.post.f <- crop(ps.post.3, buffer(ps.split[6], 45, capstyle='square'))
+ps.post.g <- crop(ps.post.3, buffer(ps.split[7], 45, capstyle='square'))
+ps.post.h <- crop(ps.post.3, buffer(ps.split[8], 45, capstyle='square'))
+
+lm.post.a <- calc_local_minima_terra_parallel(ps.post.a, n.cores=4)
+gc()
+lm.post.b <- calc_local_minima_terra_parallel(ps.post.b, n.cores=4)
+gc()
+lm.post.c <- calc_local_minima_terra_parallel(ps.post.c, n.cores=4)
+gc()
+lm.post.d <- calc_local_minima_terra_parallel(ps.post.d, n.cores=4)
+gc()
+lm.post.e <- calc_local_minima_terra_parallel(ps.post.e, n.cores=4)
+gc()
+lm.post.f <- calc_local_minima_terra_parallel(ps.post.f, n.cores=4)
+gc()
+lm.post.g <- calc_local_minima_terra_parallel(ps.post.g, n.cores=4)
+gc()
+lm.post.h <- calc_local_minima_terra_parallel(ps.post.h, n.cores=4)
+gc()
+
+lm.3 <- mosaic(lm.post.a, lm.post.b, lm.post.c, lm.post.d, lm.post.e, lm.post.f, lm.post.g, lm.post.h, fun=max)
+
+remove(lm.post.a, lm.post.b, lm.post.c, lm.post.d, lm.post.e, lm.post.f, lm.post.g, lm.post.h)
+```
+
+```{r}
+# split imagery
+ps.post.a <- crop(ps.post.4, buffer(ps.split[1], 45, capstyle='square'))
+ps.post.b <- crop(ps.post.4, buffer(ps.split[2], 45, capstyle='square'))
+ps.post.c <- crop(ps.post.4, buffer(ps.split[3], 45, capstyle='square'))
+ps.post.d <- crop(ps.post.4, buffer(ps.split[4], 45, capstyle='square'))
+ps.post.e <- crop(ps.post.4, buffer(ps.split[5], 45, capstyle='square'))
+ps.post.f <- crop(ps.post.4, buffer(ps.split[6], 45, capstyle='square'))
+ps.post.g <- crop(ps.post.4, buffer(ps.split[7], 45, capstyle='square'))
+ps.post.h <- crop(ps.post.4, buffer(ps.split[8], 45, capstyle='square'))
+
+lm.post.a <- calc_local_minima_terra_parallel(ps.post.a, n.cores=4)
+gc()
+lm.post.b <- calc_local_minima_terra_parallel(ps.post.b, n.cores=4)
+gc()
+lm.post.c <- calc_local_minima_terra_parallel(ps.post.c, n.cores=4)
+gc()
+lm.post.d <- calc_local_minima_terra_parallel(ps.post.d, n.cores=4)
+gc()
+lm.post.e <- calc_local_minima_terra_parallel(ps.post.e, n.cores=4)
+gc()
+lm.post.f <- calc_local_minima_terra_parallel(ps.post.f, n.cores=4)
+gc()
+lm.post.g <- calc_local_minima_terra_parallel(ps.post.g, n.cores=4)
+gc()
+lm.post.h <- calc_local_minima_terra_parallel(ps.post.h, n.cores=4)
+gc()
+
+lm.4 <- mosaic(lm.post.a, lm.post.b, lm.post.c, lm.post.d, lm.post.e, lm.post.f, lm.post.g, lm.post.h, fun=max)
+
+remove(lm.post.a, lm.post.b, lm.post.c, lm.post.d, lm.post.e, lm.post.f, lm.post.g, lm.post.h)
+
+remove(ps.post.a, ps.post.b, ps.post.c, ps.post.d, ps.post.e, ps.post.f, ps.post.g, ps.post.h)
+```
+
+## Sum of Standard Deviation
+
+```{r}
+# split imagery into two
+ps.post.a <- crop(ps.post.1, buffer(ps.split[1], 45, capstyle='square'))
+ps.post.b <- crop(ps.post.1, buffer(ps.split[2], 45, capstyle='square'))
+ps.post.c <- crop(ps.post.1, buffer(ps.split[3], 45, capstyle='square'))
+ps.post.d <- crop(ps.post.1, buffer(ps.split[4], 45, capstyle='square'))
+ps.post.e <- crop(ps.post.1, buffer(ps.split[5], 45, capstyle='square'))
+ps.post.f <- crop(ps.post.1, buffer(ps.split[6], 45, capstyle='square'))
+ps.post.g <- crop(ps.post.1, buffer(ps.split[7], 45, capstyle='square'))
+ps.post.h <- crop(ps.post.1, buffer(ps.split[8], 45, capstyle='square'))
+
+sd.post.a <- calc_sum_sd_terra_parallel(ps.post.a, n.cores=4)
+gc()
+sd.post.b <- calc_sum_sd_terra_parallel(ps.post.b, n.cores=4)
+gc()
+sd.post.c <- calc_sum_sd_terra_parallel(ps.post.c, n.cores=4)
+gc()
+sd.post.d <- calc_sum_sd_terra_parallel(ps.post.d, n.cores=4)
+gc() 
+sd.post.e <- calc_sum_sd_terra_parallel(ps.post.e, n.cores=4)
+gc()
+sd.post.f <- calc_sum_sd_terra_parallel(ps.post.f, n.cores=4)
+gc()
+sd.post.g <- calc_sum_sd_terra_parallel(ps.post.g, n.cores=4)
+gc()
+sd.post.h <- calc_sum_sd_terra_parallel(ps.post.h, n.cores=4)
+gc()
+
+sd.1 <- mosaic(sd.post.a, sd.post.b, sd.post.c, sd.post.d, sd.post.e, sd.post.f, sd.post.g, sd.post.h, fun=max)
+
+remove(sd.post.a, sd.post.b, sd.post.c, sd.post.d, sd.post.e, sd.post.f, sd.post.g, sd.post.h)
+```
+
+```{r}
+# split imagery into two
+ps.post.a <- crop(ps.post.2, buffer(ps.split[1], 45, capstyle='square'))
+ps.post.b <- crop(ps.post.2, buffer(ps.split[2], 45, capstyle='square'))
+ps.post.c <- crop(ps.post.2, buffer(ps.split[3], 45, capstyle='square'))
+ps.post.d <- crop(ps.post.2, buffer(ps.split[4], 45, capstyle='square'))
+ps.post.e <- crop(ps.post.2, buffer(ps.split[5], 45, capstyle='square'))
+ps.post.f <- crop(ps.post.2, buffer(ps.split[6], 45, capstyle='square'))
+ps.post.g <- crop(ps.post.2, buffer(ps.split[7], 45, capstyle='square'))
+ps.post.h <- crop(ps.post.2, buffer(ps.split[8], 45, capstyle='square'))
+
+sd.post.a <- calc_sum_sd_terra_parallel(ps.post.a, n.cores=4)
+gc()
+sd.post.b <- calc_sum_sd_terra_parallel(ps.post.b, n.cores=4)
+gc()
+sd.post.c <- calc_sum_sd_terra_parallel(ps.post.c, n.cores=4)
+gc()
+sd.post.d <- calc_sum_sd_terra_parallel(ps.post.d, n.cores=4)
+gc() 
+sd.post.e <- calc_sum_sd_terra_parallel(ps.post.e, n.cores=4)
+gc()
+sd.post.f <- calc_sum_sd_terra_parallel(ps.post.f, n.cores=4)
+gc()
+sd.post.g <- calc_sum_sd_terra_parallel(ps.post.g, n.cores=4)
+gc()
+sd.post.h <- calc_sum_sd_terra_parallel(ps.post.h, n.cores=4)
+gc()
+
+sd.2 <- mosaic(sd.post.a, sd.post.b, sd.post.c, sd.post.d, sd.post.e, sd.post.f, sd.post.g, sd.post.h, fun=max)
+
+remove(sd.post.a, sd.post.b, sd.post.c, sd.post.d, sd.post.e, sd.post.f, sd.post.g, sd.post.h)
+```
+
+```{r}
+# split imagery into two
+ps.post.a <- crop(ps.post.3, buffer(ps.split[1], 45, capstyle='square'))
+ps.post.b <- crop(ps.post.3, buffer(ps.split[2], 45, capstyle='square'))
+ps.post.c <- crop(ps.post.3, buffer(ps.split[3], 45, capstyle='square'))
+ps.post.d <- crop(ps.post.3, buffer(ps.split[4], 45, capstyle='square'))
+ps.post.e <- crop(ps.post.3, buffer(ps.split[5], 45, capstyle='square'))
+ps.post.f <- crop(ps.post.3, buffer(ps.split[6], 45, capstyle='square'))
+ps.post.g <- crop(ps.post.3, buffer(ps.split[7], 45, capstyle='square'))
+ps.post.h <- crop(ps.post.3, buffer(ps.split[8], 45, capstyle='square'))
+
+sd.post.a <- calc_sum_sd_terra_parallel(ps.post.a, n.cores=4)
+gc()
+sd.post.b <- calc_sum_sd_terra_parallel(ps.post.b, n.cores=4)
+gc()
+sd.post.c <- calc_sum_sd_terra_parallel(ps.post.c, n.cores=4)
+gc()
+sd.post.d <- calc_sum_sd_terra_parallel(ps.post.d, n.cores=4)
+gc() 
+sd.post.e <- calc_sum_sd_terra_parallel(ps.post.e, n.cores=4)
+gc()
+sd.post.f <- calc_sum_sd_terra_parallel(ps.post.f, n.cores=4)
+gc()
+sd.post.g <- calc_sum_sd_terra_parallel(ps.post.g, n.cores=4)
+gc()
+sd.post.h <- calc_sum_sd_terra_parallel(ps.post.h, n.cores=4)
+gc()
+
+sd.3 <- mosaic(sd.post.a, sd.post.b, sd.post.c, sd.post.d, sd.post.e, sd.post.f, sd.post.g, sd.post.h, fun=max)
+
+remove(sd.post.a, sd.post.b, sd.post.c, sd.post.d, sd.post.e, sd.post.f, sd.post.g, sd.post.h)
+```
+
+```{r}
+# split imagery into two
+ps.post.a <- crop(ps.post.4, buffer(ps.split[1], 45, capstyle='square'))
+ps.post.b <- crop(ps.post.4, buffer(ps.split[2], 45, capstyle='square'))
+ps.post.c <- crop(ps.post.4, buffer(ps.split[3], 45, capstyle='square'))
+ps.post.d <- crop(ps.post.4, buffer(ps.split[4], 45, capstyle='square'))
+ps.post.e <- crop(ps.post.4, buffer(ps.split[5], 45, capstyle='square'))
+ps.post.f <- crop(ps.post.4, buffer(ps.split[6], 45, capstyle='square'))
+ps.post.g <- crop(ps.post.4, buffer(ps.split[7], 45, capstyle='square'))
+ps.post.h <- crop(ps.post.4, buffer(ps.split[8], 45, capstyle='square'))
+
+sd.post.a <- calc_sum_sd_terra_parallel(ps.post.a, n.cores=4)
+gc()
+sd.post.b <- calc_sum_sd_terra_parallel(ps.post.b, n.cores=4)
+gc()
+sd.post.c <- calc_sum_sd_terra_parallel(ps.post.c, n.cores=4)
+gc()
+sd.post.d <- calc_sum_sd_terra_parallel(ps.post.d, n.cores=4)
+gc() 
+sd.post.e <- calc_sum_sd_terra_parallel(ps.post.e, n.cores=4)
+gc()
+sd.post.f <- calc_sum_sd_terra_parallel(ps.post.f, n.cores=4)
+gc()
+sd.post.g <- calc_sum_sd_terra_parallel(ps.post.g, n.cores=4)
+gc()
+sd.post.h <- calc_sum_sd_terra_parallel(ps.post.h, n.cores=4)
+gc()
+
+sd.4 <- mosaic(sd.post.a, sd.post.b, sd.post.c, sd.post.d, sd.post.e, sd.post.f, sd.post.g, sd.post.h, fun=max)
+
+remove(sd.post.a, sd.post.b, sd.post.c, sd.post.d, sd.post.e, sd.post.f, sd.post.g, sd.post.h)
+
+remove(ps.post.a, ps.post.b, ps.post.c, ps.post.d, ps.post.e, ps.post.f, ps.post.g, ps.post.h)
+```
+
+## Other Indices
+
+```{r}
+b.1 <- app(ps.post.1, tcb, cores=4)
+gc()
+b.2 <- app(ps.post.2, tcb, cores=4)
+gc()
+b.3 <- app(ps.post.3, tcb, cores=4)
+gc()
+b.4 <- app(ps.post.4, tcb, cores=4)
+gc()
+
+# False-Color Brightness
+fcb.post.1 <- app(ps.post.1, calc_fcb, cores=4)
+gc()
+fcb.post.2 <- app(ps.post.2, calc_fcb, cores=4)
+gc()
+fcb.post.3 <- app(ps.post.3, calc_fcb, cores=4)
+gc()
+fcb.post.4 <- app(ps.post.4, calc_fcb, cores=4)
+gc()
+```
+
+
+```{r}
+# GNDVI using scaled imagery
+gndvi.post.1 <- app(ps.post.1.s, calc_gndmi, cores=4)
+gc()
+gndvi.post.2 <- app(ps.post.2.s, calc_gndmi, cores=4)
+gc()
+gndvi.post.3 <- app(ps.post.3.s, calc_gndmi, cores=4)
+gc()
+gndvi.post.4 <- app(ps.post.4.s, calc_gndmi, cores=4)
+gc()
+
+# RGI using scaled imagery
+rgi.post.1 <- app(ps.post.1.s, calc_rgi, cores=4)
+gc()
+rgi.post.2 <- app(ps.post.2.s, calc_rgi, cores=4)
+gc()
+rgi.post.3 <- app(ps.post.3.s, calc_rgi, cores=4)
+gc()
+rgi.post.4 <- app(ps.post.4.s, calc_rgi, cores=4)
+gc()
+
+#  NDVI using scaled imagery
+ndvi.post.1 <- app(ps.post.1.s, calc_ndvi, cores=4)
+gc()
+ndvi.post.2 <- app(ps.post.2.s, calc_ndvi, cores=4)
+gc()
+ndvi.post.3 <- app(ps.post.3.s, calc_ndvi, cores=4)
+gc()
+ndvi.post.4 <- app(ps.post.4.s, calc_ndvi, cores=4)
+gc()
+```
+
+```{r}
+# ps.post.1 <- ps.post.1 %>% terra::project(lm.1)
+# gc()
+# ps.post.2 <- ps.post.2 %>% terra::project(lm.2)
+# gc()
+# ps.post.3 <- ps.post.3 %>% terra::project(lm.3)
+# gc()
+# ps.post.4 <- ps.post.4 %>% terra::project(lm.4)
+# gc()
+```
+
+
+```{r }
+stack.post.1 <- c(ps.post.1, ndvi.post.1, gndvi.post.1, rgi.post.1, fcb.post.1, b.1, sd.1, lm.1)
+names(stack.post.1) <- c('B', 'G', 'R', 'NIR', 'NDVI', 'GNDVI', 'RGI', 'FCB', 'BRGHT', 'SDB', 'LM')
+writeRaster(stack.post.1, here(paste('imagery/', name.1, '_FullStack.tif', sep='')), overwrite=FALSE)
+gc()
+stack.post.2 <- c(ps.post.2, ndvi.post.2, gndvi.post.2, rgi.post.2, fcb.post.2, b.2, sd.2, lm.2)
+names(stack.post.2) <- c('B', 'G', 'R', 'NIR', 'NDVI', 'GNDVI', 'RGI', 'FCB', 'BRGHT', 'SDB', 'LM')
+writeRaster(stack.post.2, here(paste('imagery/', name.2, '_FullStack.tif', sep='')), overwrite=FALSE)
+gc()
+stack.post.3 <- c(ps.post.3, ndvi.post.3, gndvi.post.3, rgi.post.3, fcb.post.3, b.3, sd.3, lm.3)
+names(stack.post.3) <- c('B', 'G', 'R', 'NIR', 'NDVI', 'GNDVI', 'RGI', 'FCB', 'BRGHT', 'SDB', 'LM')
+writeRaster(stack.post.3, here(paste('imagery/', name.3, '_FullStack.tif', sep='')), overwrite=FALSE)
+gc()
+stack.post.4 <- c(ps.post.4, ndvi.post.4, gndvi.post.4, rgi.post.4, fcb.post.4, b.4, sd.4, lm.4)
+names(stack.post.4) <- c('B', 'G', 'R', 'NIR', 'NDVI', 'GNDVI', 'RGI', 'FCB', 'BRGHT', 'SDB', 'LM')
+writeRaster(stack.post.4, here(paste('imagery/', name.4, '_FullStack.tif', sep='')), overwrite=FALSE)
+gc()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

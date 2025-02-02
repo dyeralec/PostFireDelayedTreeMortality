@@ -1,0 +1,833 @@
+---
+title: "Forest Classification"
+author: "Alec Dyer"
+date: "January 24, 2024"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = 'center')
+```
+
+```{r message=F, include=F}
+library(dplyr)
+library(raster)
+library(terra)
+library(tidyterra)
+library(sf)
+library(rgdal)
+library(stats)
+library(ggplot2)
+library(caret)
+library(MASS)
+library(tidymodels)
+library(rpart.plot)
+library(vip)
+library(xgboost)
+library(randomForest)
+library(rfUtilities)
+library(ROSE)
+library(splitTools)
+library(matrixStats)
+library(here)
+library(parallel)
+library(corrplot)
+library(car)
+library(pROC)
+```
+
+# Inputs
+
+
+```{r eval=F}
+fires <- c('Riverside','BeachieCreek','Lionshead','HolidayFarm','ArchieCreek')
+
+df.img <- data.frame(
+  Fire = c('Riverside','Riverside','Riverside','Riverside','Riverside',
+           'BeachieCreek','BeachieCreek','BeachieCreek','BeachieCreek','BeachieCreek',
+           'Lionshead','Lionshead','Lionshead','Lionshead','Lionshead',
+           'HolidayFarm','HolidayFarm','HolidayFarm','HolidayFarm','HolidayFarm',
+           'ArchieCreek','ArchieCreek','ArchieCreek','ArchieCreek','ArchieCreek'),
+  
+  Year = c('2020_pre', 2020, 2021, 2022, 2023,
+           '2020_pre', 2020, 2021, 2022, 2023,
+           '2020_pre', 2020, 2021, 2022, 2023,
+           '2020_pre', 2020, 2021, 2022, 2023,
+           '2020_pre', 2020, 2021, 2022, 2023),
+  
+  Stack = c(here('imagery_normal_processed/riverside_2020_prefire.tif'),
+            here('imagery_normal_processed/riverside_2020.tif'),
+            here('imagery_normal_processed/riverside_2021.tif'),
+            here('imagery_normal_processed/riverside_2022.tif'),
+            here('imagery_normal_processed/riverside_2023.tif'),
+            here('imagery_normal_processed/beachie_creek_2020_prefire.tif'),
+            here('imagery_normal_processed/beachie_creek_2020.tif'),
+            here('imagery_normal_processed/beachie_creek_2021.tif'),
+            here('imagery_normal_processed/beachie_creek_2022.tif'),
+            here('imagery_normal_processed/beachie_creek_2023.tif'),
+            here('imagery_normal_processed/lionshead_2020_prefire.tif'),
+            here('imagery_normal_processed/lionshead_2020.tif'),
+            here('imagery_normal_processed/lionshead_2021.tif'),
+            here('imagery_normal_processed/lionshead_2022.tif'),
+            here('imagery_normal_processed/lionshead_2023.tif'),
+            here('imagery_normal_processed/holiday_farm_2020_prefire.tif'),
+            here('imagery_normal_processed/holiday_farm_2020.tif'),
+            here('imagery_normal_processed/holiday_farm_2021.tif'),
+            here('imagery_normal_processed/holiday_farm_2022.tif'),
+            here('imagery_normal_processed/holiday_farm_2023.tif'),
+            here('imagery_normal_processed/archie_creek_2020_prefire.tif'),
+            here('imagery_normal_processed/archie_creek_2020.tif'),
+            here('imagery_normal_processed/archie_creek_2021.tif'),
+            here('imagery_normal_processed/archie_creek_2022.tif'),
+            here('imagery_normal_processed/archie_creek_2023.tif'))
+)
+
+df.pts <- c(
+  Riverside = here('samples/riverside_pts.shp'),
+  BeachieCreek = here('samples/beachiecreek_pts.shp'),
+  Lionshead = here('samples/lionshead_pts.shp'),
+  HolidayFarm = here('samples/holidayfarm_pts.shp'),
+  ArchieCreek = here('samples/archiecreek_pts.shp')
+)
+
+df.pif <- c(
+  Riverside = here('samples/riverside_pts_pif.shp'),
+  BeachieCreek = here('samples/beachiecreek_pts_pif.shp'),
+  Lionshead = here('samples/lionshead_pts_pif.shp'),
+  HolidayFarm = here('samples/holidayfarm_pts_pif.shp'),
+  ArchieCreek = here('samples/archiecreek_pts_pif.shp')
+)
+```
+
+# Data Prep
+
+```{r}
+pts.0 <- apply(df.img %>% filter(Year=='2020_pre'), 1,  FUN=function(row) {
+  # open data
+  r <- rast(row['Stack'])
+  pts <- vect(df.pif[row['Fire']]) %>% terra::project('epsg:32610') %>% 
+    dplyr::select(US_L4CODE, struccond, loc, Uncertain, Forest, Shadow, ForType, PercCov, Cover)
+  
+  # extract points
+  ext <- terra::extract(r, pts, raw=FALSE)
+  # join dfs
+  pts.join <- cbind(pts, ext) %>% as.data.frame()
+  # add fire name
+  pts.join$fire <- row['Fire']
+  pts.join$year <- row['Year']
+  
+  return(pts.join)
+  
+}) %>% bind_rows() %>% mutate(Forest_B = as.factor(Forest))
+
+pts.1 <- apply(df.img %>% filter(Year==2020), 1,  FUN=function(row) {
+  # open data
+  r <- rast(row['Stack'])
+  pts <- vect(df.pif[row['Fire']]) %>% terra::project('epsg:32610') %>% 
+    dplyr::select(US_L4CODE, struccond, loc, Uncertain, Forest, Shadow, ForType, PercCov, Cover)
+  
+  # extract points
+  ext <- terra::extract(r, pts, raw=FALSE)
+  # join dfs
+  pts.join <- cbind(pts, ext) %>% as.data.frame()
+  # add fire name
+  pts.join$fire <- row['Fire']
+  pts.join$year <- row['Year']
+  
+  return(pts.join)
+  
+}) %>% bind_rows() %>% mutate(Forest_B = as.factor(Forest))
+
+pts.2 <- apply(df.img %>% filter(Year==2021), 1,  FUN=function(row) {
+  # open data
+  r <- rast(row['Stack'])
+  pts <- vect(df.pif[row['Fire']]) %>% terra::project('epsg:32610') %>% 
+    dplyr::select(US_L4CODE, struccond, loc, Uncertain, Forest, Shadow, ForType, PercCov, Cover)
+  
+  # extract points
+  ext <- terra::extract(r, pts, raw=FALSE)
+  # join dfs
+  pts.join <- cbind(pts, ext) %>% as.data.frame()
+  # add fire name
+  pts.join$fire <- row['Fire']
+  pts.join$year <- row['Year']
+  
+  return(pts.join)
+  
+}) %>% bind_rows() %>% mutate(Forest_B = as.factor(Forest))
+
+pts.3 <- apply(df.img %>% filter(Year==2022), 1,  FUN=function(row) {
+  # open data
+  r <- rast(row['Stack'])
+  pts <- vect(df.pts[row['Fire']]) %>% terra::project('epsg:32610') %>% 
+    dplyr::select(US_L4CODE, struccond, loc, Uncertain, Forest, Shadow, ForType, PercCov, Cover)
+  
+  # extract points
+  ext <- terra::extract(r, pts, raw=FALSE)
+  # join dfs
+  pts.join <- cbind(pts, ext) %>% as.data.frame()
+  # add fire name
+  pts.join$fire <- row['Fire']
+  pts.join$year <- row['Year']
+  
+  return(pts.join)
+  
+}) %>% bind_rows() %>% mutate(Forest_B = as.factor(Forest))
+
+pts.4 <- apply(df.img %>% filter(Year==2023), 1,  FUN=function(row) {
+  # open data
+  r <- rast(row['Stack'])
+  pts <- vect(df.pif[row['Fire']]) %>% terra::project('epsg:32610') %>% 
+    dplyr::select(US_L4CODE, struccond, loc, Uncertain, Forest, Shadow, ForType, PercCov, Cover)
+  
+  # extract points
+  ext <- terra::extract(r, pts, raw=FALSE)
+  # join dfs
+  pts.join <- cbind(pts, ext) %>% as.data.frame()
+  # add fire name
+  pts.join$fire <- row['Fire']
+  pts.join$year <- row['Year']
+  
+  return(pts.join)
+  
+}) %>% bind_rows() %>% mutate(Forest_B = as.factor(Forest))
+
+pts.3.pif <- apply(df.img %>% filter(Year==2022), 1,  FUN=function(row) {
+  # open data
+  r <- rast(row['Stack'])
+  pts <- vect(df.pif[row['Fire']]) %>% terra::project('epsg:32610') %>% 
+    dplyr::select(US_L4CODE, struccond, loc, Uncertain, Forest, Shadow, ForType, PercCov, Cover)
+  
+  # extract points
+  ext <- terra::extract(r, pts, raw=FALSE)
+  # join dfs
+  pts.join <- cbind(pts, ext) %>% as.data.frame()
+  # add fire name
+  pts.join$fire <- row['Fire']
+  pts.join$year <- row['Year']
+  
+  return(pts.join)
+  
+}) %>% bind_rows() %>% mutate(Forest_B = as.factor(Forest))
+```
+
+
+
+
+# Supervised Classification
+
+## Feature Analysis
+
+```{r}
+# combine point data into one
+pts.comb <- rbind(pts.0, pts.1, pts.2, pts.3, pts.4) %>% drop_na() %>% dplyr::select(Forest_B, R, G, B, NIR, NDVI, GNDVI, BRGHT, SDB, RDNBR)
+pts.comb$Forest_B <- as.numeric(pts.comb$Forest_B)
+```
+
+```{r eval=F}
+ggplot(gather(pts.comb %>% dplyr::select(-Forest_B)), aes(value)) + 
+    geom_histogram(bins = 20) + 
+    facet_wrap(~key, scales = 'free_x')
+```
+
+```{r warning=F, eval=F}
+# multicollinearity matrix
+pts.comb.corr <- cor(pts.comb %>% dplyr::select(-Forest_B))
+```
+
+```{r eval=F}
+(g.a <- corrplot.mixed(pts.comb.corr, lower='number', number.cex=0.75))
+```
+
+```{r eval=F}
+# create linear model
+model <- lm(Forest_B ~ ., data=pts.comb %>% dplyr::select(-c(R,G,B)))
+# run VIF on model
+vif(model)
+```
+
+
+## Modelling
+
+### Data Preparation
+
+```{r}
+# drop rows with NA values
+pts.0 <- pts.0 %>% drop_na(any_of('SDB'))
+pts.1 <- pts.1 %>% drop_na(any_of('SDB'))
+pts.2 <- pts.2 %>% drop_na(any_of('SDB'))
+pts.3 <- pts.3 %>% drop_na(any_of('SDB'))
+pts.3.pif <- pts.3.pif %>% drop_na(any_of('SDB'))
+pts.4 <- pts.4 %>% drop_na(any_of('SDB'))
+```
+
+Get point data in 2020, 2021, and 2023 for non-burned (nb) point locations
+
+```{r}
+pts.nb <- bind_rows(pts.0, pts.1, pts.2, pts.3.pif, pts.4)
+
+# combine NB observations with the original training data
+pts.comb <- bind_rows(pts.0, pts.1, pts.2, pts.3, pts.4)
+```
+
+```{r}
+# split non-burned points in 2:1 ratio
+pts.nb.a <- pts.nb[1:588,] # 1:467
+pts.nb.b <- pts.nb[589:882,] # 468:701
+
+# create combined data using only half of the non-burned points
+pts.comb.half <- bind_rows(pts.3, pts.nb.a)
+```
+
+### Modeling for 2022 Data
+
+```{r}
+s = 123 # setting seed
+# features to train on based on VIF analysis
+feats <- c('Forest_B', 'NIR', 'NDVI', 'GNDVI', 'BRGHT', 'SDB', 'fire')
+# subset df
+pts.stack.3.s <- pts.3 %>% dplyr::select(feats)
+# 10 stratified folds
+folds <- create_folds(pts.stack.3.s$Forest_B, k = 10, seed = s, m_rep = 1, shuffle=FALSE)
+# save accuracy scores for each fold
+cv_acc <- data.frame(matrix(ncol = 3, nrow = 10))
+colnames(cv_acc) <- c('Decision Tree', 'Random Forest', 'Boosted Regression Tree')
+# save AUC scores for each fold
+cv_auc <- data.frame(matrix(ncol = 3, nrow = 10))
+colnames(cv_auc) <- c('Decision Tree', 'Random Forest', 'Boosted Regression Tree')
+# object to save variable importance results to
+cv_imp <- data.frame(matrix(ncol = length(feats)-1, nrow = 10))
+colnames(cv_imp) <- feats[-1]
+# save internal rf model mean decrease in accuracy for each feature
+cv_imp_rf <- data.frame(matrix(ncol = length(feats)-1, nrow = 10))
+colnames(cv_imp_rf) <- feats[-1]
+
+if (exists("cv.cm")) {
+  remove(cv.cm)
+}
+
+# loop over each set of train and test folds
+for (i in seq_along(folds)) {
+  train <- pts.stack.3.s[folds[[i]], ]
+  test <- pts.stack.3.s[-folds[[i]], ]
+  
+  # perform over-sampling
+  train <- ovun.sample(Forest_B~., data=train, method='over')$data
+  
+  # train DT model
+  dt.mdl <- decision_tree() %>%
+    set_engine("rpart") %>%
+    set_mode("classification") %>% 
+    fit(Forest_B ~ ., data = train)
+  
+  # train RF model
+  rf.mdl <- randomForest(Forest_B ~ .,
+    data = train,
+    importance = TRUE,
+    ntree = 1000, # n rounds
+  )
+  
+  # train BRT model
+  brt.mdl <- boost_tree(
+    mode = "classification",
+    trees = 1000, #nrounds
+  ) %>%
+    set_engine("xgboost", verbose=0) %>%
+    fit(Forest_B ~ ., data = train)
+  
+  # Make predictions on the testing data
+  dt.p <- as.matrix(dt.mdl %>% predict(test))
+  rf.p <- as.matrix(rf.mdl %>% predict(test))
+  brt.p <- as.matrix(brt.mdl %>% predict(test))
+  
+  # confusion matrices
+  dt.cm <- confusionMatrix(table(dt.p, test$Forest_B), positive='1')
+  rf.cm <- confusionMatrix(table(rf.p, test$Forest_B), positive='1')
+  brt.cm <- confusionMatrix(table(brt.p, test$Forest_B), positive='1')
+  
+  # add random forest confusion matrix
+  if (exists("cv.cm")) {
+    cv.cm <- cv.cm + rf.cm$table
+  } else {
+    cv.cm <- rf.cm$table
+  }
+  
+  # save accuracy scores from confusion matrices
+  cv_acc[i,'Decision Tree'] <- dt.cm$byClass[11]
+  cv_acc[i,'Random Forest'] <- rf.cm$byClass[11]
+  cv_acc[i,'Boosted Regression Tree'] <- brt.cm$byClass[11]
+  
+  # save AUC scores from confusion matrices
+  test$Forest <- as.numeric(test$Forest_B)
+  cv_auc[i,'Decision Tree'] <- auc(dt.p, test$Forest)
+  cv_auc[i,'Random Forest'] <- auc(rf.p, test$Forest)
+  cv_auc[i,'Boosted Regression Tree'] <- auc(brt.p, test$Forest)
+  
+  # save feature importance 
+  var_imp <- vip::vip(rf.mdl)
+  df_imp <- as.data.frame(var_imp$data)
+  df_imp <- df_imp[match(feats[-1], df_imp$Variable),]
+  cv_imp[i,] <- as.vector(df_imp$Importance)
+  
+  # save permuatation feature importance
+  cv_imp_rf[i,] <- rf.mdl$importance[,3]
+}
+```
+
+```{r fig.cap='Figure 6: Boxplot showing the distribution of the cross-validated balanced accuracy from the supervised forest classification models.'}
+(g1 <- boxplot(cv_acc, horizontal=F, ylab='Balanced Accuracy', xlab='Model', main='Cross-Validated Balanced Accuracy'))
+(g1.auc <- boxplot(cv_auc, horizontal=F, ylab='AUC', xlab='Model', main='Cross-Validated AUC Score'))
+```
+
+```{r}
+(g2 <- cv_acc %>%
+  gather('Model', 'Acc', `Decision Tree`:`Boosted Regression Tree`) %>%
+  ggplot( aes(x=Model, y=Acc, fill=Model)) +
+    geom_boxplot() +
+    # scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+    geom_jitter(color="black", size=1, alpha=0.9) +
+    # theme_ipsum() +
+    theme(
+      legend.position="none",
+      plot.title = element_text(size=11)
+    ) +
+    # ggtitle("A boxplot with jitter") +
+    xlab("Model") + ylab('Balanced Accuracy'))
+```
+
+
+```{r}
+feats.ordered <- colMedians(cv_imp %>% as.matrix()) %>% sort(decreasing = FALSE) %>% names()
+
+(g3 <- cv_imp %>%
+  gather('Feature', 'Value') %>%
+  mutate(Value=as.numeric(Value)) %>%
+  ggplot(aes(y=factor(Feature, level = feats.ordered), x=Value)) + geom_boxplot() + ylab('Feature') + xlab('Importance'))
+```
+
+```{r}
+feats.ordered <- colMedians(cv_imp_rf %>% as.matrix()) %>% sort(decreasing = FALSE) %>% names()
+
+(g4 <- cv_imp_rf %>%
+  gather('Feature', 'Value') %>%
+  mutate(Value=as.numeric(Value)) %>%
+  ggplot(aes(y=factor(Feature, level = feats.ordered), x=Value)) + geom_boxplot() + ylab('Feature') + xlab('Decrease in Accuracy'))
+```
+
+### Sentitivity Test
+
+To determine how many training samples are needed to develop accurate classification models for this region, a sensitivity test will be performed by which the number of training samples will vary from low (n=7) to high (n=147) with increments of 10 observations. A held out testing set (n=17) will be used to validate
+
+```{r eval=F}
+sq <- seq( 20, 700, 20) # seq(37, 147, 10)
+
+# save error scores for each fold
+cv_acc_sens <- data.frame(matrix(ncol = length(sq), nrow = 10))
+colnames(cv_acc_sens) <- sq %>% as.character()
+
+# loop over each set of train and test folds
+for (i in seq_along(sq)) {
+  df.t <- pts.stack.3.s %>% sample_n(sq[i])
+  
+  folds <- createFolds(df.t$Forest_B, list=TRUE, returnTrain = TRUE)
+  
+  # loop over each set of train and test folds
+  for (j in seq_along(folds)) {
+    df.t <- df.t[folds[[j]], ]
+    part <- createDataPartition(df.t$Forest_B, p=0.7)
+    train <- df.t[part$Resample1, ] %>% drop_na()
+    test <- df.t[-part$Resample1, ] %>% drop_na()
+    
+    # train RF model
+    rf.mdl <- randomForest(Forest_B ~ .,
+      data = train,
+      importance = TRUE,
+      ntree = 1000, # n rounds
+    )
+    
+    # Make predictions on the testing data
+    rf.p <- as.matrix(rf.mdl %>% predict(test))
+  
+    # confusion matrices
+    rf.cm <- confusionMatrix(table(factor(rf.p, levels=0:1), 
+      factor(test$Forest_B, levels=0:1)))
+    
+    # save accuracy scores from confusion matrices
+    cv_acc_sens[j, sq[i] %>% as.character()] <- rf.cm$byClass[11]
+  }
+  
+}
+```
+
+
+```{r eval=F}
+boxplot(cv_acc_sens, horizontal=F, ylab='Balanced Accuracy', xlab='# Samples', main='Cross-Validated Balanced Accuracy')
+```
+
+```{r eval=F}
+library(OOBCurve)
+```
+
+```{r eval=F}
+rf.mdl.3 <- randomForest(Forest_B ~ .,
+  data = pts.stack.3.s %>% dplyr::select(-fire),
+  importance = TRUE,
+  ntree = 100, # n rounds
+  keep.inbag=TRUE
+)
+
+sonar.task = makeClassifTask(data = pts.stack.3.s %>% dplyr::select(-fire), target = "Forest_B")
+
+oob <- OOBCurve(rf.mdl.3, data=pts.stack.3.s, task=sonar.task)
+
+plot(oob$auc)
+```
+
+
+
+### Model Performance on Temporal Imagery
+
+NAIP imagery is only available in 2022. However, forest cover classifications need to be accurate across imagery over time (i.e., in 2020, 2021, and 2023). Therefore, model accuracy will also be tested on imagery from the other years. Since land cover can change over time, only observations with no disturbances (n=34) will be used for validation.
+
+Balanced accuracy results on the temporal imagery are shown in Figure 8. Accuracy on temporal imagery can be very low when training on only the 2022 data (Without Combined Data group in Figure 8). However, if the model is also trained on the non-disturbed data from 2020, 2021, and 2023, model accuracy improves drastically for all models (With Combined Data Group in Figure 8). The Random Forest model is still the best performing model.
+
+
+```{r}
+s = 123 # setting seed
+
+pts.comb.s <- pts.comb %>% dplyr::select(feats) 
+pts.comb.half.s <- pts.comb.half %>% dplyr::select(feats)
+
+# 10 stratified folds by target as well as year
+folds <- create_folds(pts.comb.half.s$Forest_B, k = 10, seed = s, m_rep = 1, shuffle=FALSE)
+
+# save error scores for each fold
+cv_acc_comb <- data.frame(matrix(ncol = 3, nrow = 10))
+colnames(cv_acc_comb) <- c('Decision Tree', 'Random Forest', 'Boosted Regression Tree')
+# save AUC scores for each fold
+cv_auc_comb <- data.frame(matrix(ncol = 3, nrow = 10))
+colnames(cv_auc_comb) <- c('Decision Tree', 'Random Forest', 'Boosted Regression Tree')
+
+# object to save variable importance results to
+cv_imp <- data.frame(matrix(ncol = length(feats)-1, nrow = 10))
+colnames(cv_imp) <- feats[-1]
+
+if (exists("rf.cv.cm.comb")) {
+  remove(rf.cv.cm.comb)
+}
+
+if (exists("brt.cv.cm.comb")) {
+  remove(brt.cv.cm.comb)
+}
+
+# loop over each set of train and test folds
+for (i in seq_along(folds)) {
+  train <- pts.comb.half.s[folds[[i]], ]
+  test <- pts.comb.half.s[-folds[[i]], ]
+  
+  # perform over-sampling
+  train <- ovun.sample(Forest_B~., data=train, method='over')$data
+  
+  # train DT model
+  dt.mdl <- decision_tree() %>%
+    set_engine("rpart") %>%
+    set_mode("classification") %>% 
+    fit(Forest_B ~ ., data = train)
+  
+  # train RF model
+  rf.mdl <- randomForest(Forest_B ~ .,
+    data = train,
+    importance = TRUE,
+    ntree = 1000, # n rounds
+  )
+  
+  # train BRT model
+  brt.mdl <- boost_tree(
+    mode = "classification",
+    trees = 1000, #nrounds
+  ) %>%
+    set_engine("xgboost", verbose=0) %>%
+    fit(Forest_B ~ ., data = train)
+  
+  # Make predictions on the testing data
+  dt.p <- as.matrix(dt.mdl %>% predict(pts.nb.b))
+  rf.p <- as.matrix(rf.mdl %>% predict(pts.nb.b))
+  brt.p <- as.matrix(brt.mdl %>% predict(pts.nb.b))
+
+  # confusion matrices
+  dt.cm <- confusionMatrix(table(dt.p, pts.nb.b$Forest_B), positive='1')
+  rf.cm <- confusionMatrix(table(rf.p, pts.nb.b$Forest_B), positive='1')
+  brt.cm <- confusionMatrix(table(brt.p, pts.nb.b$Forest_B), positive='1')
+  
+  # add random forest confusion matrix
+  if (exists("rf.cv.cm.comb")) {
+    rf.cv.cm.comb <- rf.cv.cm.comb + rf.cm$table
+  } else {
+    rf.cv.cm.comb <- rf.cm$table
+  }
+  
+  # add BRT confusion matrix
+  if (exists("brt.cv.cm.comb")) {
+    brt.cv.cm.comb <- brt.cv.cm.comb + brt.cm$table
+  } else {
+    brt.cv.cm.comb <- brt.cm$table
+  }
+  
+  # save accuracy scores from confusion matrices
+  cv_acc_comb[i,'Decision Tree'] <- dt.cm$byClass[11]
+  cv_acc_comb[i,'Random Forest'] <- rf.cm$byClass[11]
+  cv_acc_comb[i,'Boosted Regression Tree'] <- brt.cm$byClass[11]
+  
+  # save AUC scores from confusion matrices
+  pts.nb.b$Forest <- as.numeric(pts.nb.b$Forest_B)
+  cv_auc_comb[i,'Decision Tree'] <- auc(as.numeric(dt.p), pts.nb.b$Forest)
+  cv_auc_comb[i,'Random Forest'] <- auc(as.numeric(rf.p), pts.nb.b$Forest)
+  cv_auc_comb[i,'Boosted Regression Tree'] <- auc(as.numeric(brt.p), pts.nb.b$Forest)
+  
+  # save feature importance 
+  var_imp <- vip::vip(rf.mdl, num_features = length(feats))
+  df_imp  <- as.data.frame(var_imp$data)
+  df_imp[match(feats, df_imp$Variable),]
+  cv_imp[i,] <- as.vector(df_imp$Importance)
+}
+```
+
+```{r}
+s = 123 # setting seed
+
+pts.stack.3.s <- pts.3 %>% dplyr::select(feats)
+
+# 10 stratified folds by target as well as year
+folds <- create_folds(pts.stack.3.s$Forest_B, k = 10, seed = s, m_rep = 1, shuffle=FALSE)
+# save error scores for each fold
+cv_acc_3_nb <- data.frame(matrix(ncol = 3, nrow = 10))
+colnames(cv_acc_3_nb) <- c('Decision Tree', 'Random Forest', 'Boosted Regression Tree')
+# save AUC scores for each fold
+cv_auc_3_nb <- data.frame(matrix(ncol = 3, nrow = 10))
+colnames(cv_auc_3_nb) <- c('Decision Tree', 'Random Forest', 'Boosted Regression Tree')
+
+# loop over each set of train and test folds
+for (i in seq_along(folds)) {
+  train <- pts.stack.3.s[folds[[i]], ]
+  test <- pts.stack.3.s[-folds[[i]], ]
+  
+  # perform over-sampling
+  train <- ovun.sample(Forest_B~., data=train, method='over')$data
+  
+  # train DT model
+  dt.mdl <- decision_tree() %>%
+    set_engine("rpart") %>%
+    set_mode("classification") %>% 
+    fit(Forest_B ~ ., data = train)
+  
+  # train RF model
+  rf.mdl <- randomForest(Forest_B ~ .,
+    data = train,
+    importance = TRUE,
+    ntree = 1000, # n rounds
+  )
+  
+  # train BRT model
+  brt.mdl <- boost_tree(
+    mode = "classification",
+    trees = 1000, #nrounds
+  ) %>%
+    set_engine("xgboost", verbose=0) %>%
+    fit(Forest_B ~ ., data = train)
+  
+  # Make predictions on the testing data
+  dt.p <- as.matrix(dt.mdl %>% predict(pts.nb.b))
+  rf.p <- as.matrix(rf.mdl %>% predict(pts.nb.b))
+  brt.p <- as.matrix(brt.mdl %>% predict(pts.nb.b))
+
+  # confusion matrices
+  dt.cm <- confusionMatrix(table(factor(dt.p, levels=0:1), 
+      factor(pts.nb.b$Forest_B, levels=0:1)))
+  rf.cm <- confusionMatrix(table(factor(rf.p, levels=0:1), 
+      factor(pts.nb.b$Forest_B, levels=0:1))) 
+  brt.cm <- confusionMatrix(table(factor(brt.p, levels=0:1), 
+      factor(pts.nb.b$Forest_B, levels=0:1)))
+  
+  # save accuracy scores from confusion matrices
+  cv_acc_3_nb[i,'Decision Tree'] <- dt.cm$byClass[11]
+  cv_acc_3_nb[i,'Random Forest'] <- rf.cm$byClass[11]
+  cv_acc_3_nb[i,'Boosted Regression Tree'] <- brt.cm$byClass[11]
+  
+  # save AUC scores from confusion matrices
+  pts.nb.b$Forest <- as.numeric(pts.nb.b$Forest_B)
+  cv_auc_3_nb[i,'Decision Tree'] <- auc(as.numeric(dt.p), pts.nb.b$Forest)
+  cv_auc_3_nb[i,'Random Forest'] <- auc(as.numeric(rf.p), pts.nb.b$Forest)
+  cv_auc_3_nb[i,'Boosted Regression Tree'] <- auc(as.numeric(brt.p), pts.nb.b$Forest)
+  
+}
+```
+
+
+```{r fig.cap="Figure 8: Comparision of Random Forest model balanced accuracy with and without using combined data from 2020, 2021, and 2023."}
+cv_acc_comb$Data <- 'All years'
+cv_acc_3_nb$Data <- '2022'
+
+rbind(cv_acc_3_nb, cv_acc_comb) %>%
+  gather('Model', 'Accuracy', c('Decision Tree', 'Random Forest', 'Boosted Regression Tree')) %>%
+  mutate(Data=factor(Data, levels=c('2022', 'All years'))) %>%
+  mutate(Model=factor(Model, levels=c('Decision Tree', 'Random Forest', 'Boosted Regression Tree'))) %>%
+  ggplot(aes(x=Model, y=Accuracy, fill=Data)) + geom_boxplot() + ylab('Balanced Accuracy')
+
+cv_auc_comb$Data <- 'All years'
+cv_auc_3_nb$Data <- '2022'
+
+rbind(cv_auc_3_nb, cv_auc_comb) %>%
+  gather('Model', 'AUC', c('Decision Tree', 'Random Forest', 'Boosted Regression Tree')) %>%
+  mutate(Data=factor(Data, levels=c('2022', 'All years'))) %>%
+  mutate(Model=factor(Model, levels=c('Decision Tree', 'Random Forest', 'Boosted Regression Tree'))) %>%
+  ggplot(aes(x=Model, y=AUC, fill=Data)) + geom_boxplot() + ylab('AUC')
+```
+
+```{r}
+feats.ordered <- colMedians(cv_imp %>% as.matrix()) %>% sort(decreasing = FALSE) %>% names()
+
+(g3 <- cv_imp %>%
+  gather('Feature', 'Value') %>%
+  mutate(Value=as.numeric(Value)) %>%
+  ggplot(aes(y=factor(Feature, level = feats.ordered), x=Value)) + geom_boxplot() + ylab('Feature') + xlab('Importance'))
+```
+
+
+
+### Predict Forest Cover For Entire Fire
+
+```{r}
+# Function for predicting with BRT model
+predict_brt_terra <- function(...){
+  library(xgboost)
+  p<-predict(...)
+  return(as.matrix(as.numeric(p[, 1, drop=T]))) 
+}
+
+# for XGB model if needed
+xgbpred_terra <- function(model, data) {
+  library(xgboost)
+  predict(model, newdata=as.matrix(data))
+}
+```
+
+```{r}
+# custom function to perform cross-validated predictions on SpatRaster
+predict_cv_terra <- function(f, df, raster, feats, fun=predict) {
+  train <- df[f,]
+  test <- df[-f,]
+  
+  # train xgb model
+  mdl <- randomForest(Forest_B ~ .,
+    data = df,
+    importance = TRUE,
+    ntree = 1000, # n rounds
+  )
+  
+  # predict on full image
+  pred <- terra::predict(raster %>% terra::subset(feats[-1]), model=mdl, fun=predict)
+  
+  return(pred)
+}
+```
+
+
+```{r}
+# Train models using both original data plus the non-disturbed data
+brt.mdl.comb <- boost_tree(
+    mode = "classification",
+    trees = 500, #nrounds
+  ) %>%
+    set_engine("xgboost", verbose=0) %>%
+    fit(Forest_B ~ ., data = pts.comb.s)
+```
+
+
+```{r}
+##### Riverside ################################################################
+rv.stack.0 <- c(
+  rast(df.img %>% filter(Year == '2020_pre', Fire == 'Riverside') %>% dplyr::select('Stack') %>% pull()),
+  rast(rast(df.img %>% filter(Year == '2020_pre', Fire == 'Riverside') %>% dplyr::select('Stack') %>% pull(), lyrs=1), val=1) %>% categories(value=data.frame(id=1, fire='Riverside'))
+  ) %>% terra::subset(c('NIR', 'NDVI', 'GNDVI', 'BRGHT', 'SDB', 'fire'))
+
+# Riverside
+terra::predict(rv.stack.0, brt.mdl.comb, fun=predict_brt_terra, cores=1, filename=here('forest_cover_normal/Riverside_ForestCover_BRT_2020_Prefire.tif'))
+gc()
+gc()
+
+remove(rv.stack.0)
+gc()
+```
+
+
+```{r}
+##### Beachie Creek ################################################################
+bc.stack.0 <- c(
+  rast(df.img %>% filter(Year == '2020_pre', Fire == 'BeachieCreek') %>% dplyr::select('Stack') %>% pull()),
+  rast(rast(df.img %>% filter(Year == '2020_pre', Fire == 'BeachieCreek') %>% dplyr::select('Stack') %>% pull(), lyrs=1), val=2) %>% categories(value=data.frame(id=2, fire='BeachieCreek'))
+  ) %>% terra::subset(c('NIR', 'NDVI', 'GNDVI', 'BRGHT', 'SDB', 'fire'))
+
+# Beachie Creek
+terra::predict(bc.stack.0, brt.mdl.comb, fun=predict_brt_terra, cores=1, filename=here('forest_cover_normal/BeachieCreek_ForestCover_BRT_2020_Prefire.tif'))
+gc()
+gc()
+
+remove(bc.stack.0)
+gc()
+```
+
+
+```{r}
+##### Lionshead ################################################################
+lh.stack.0 <- c(
+  rast(df.img %>% filter(Year == '2020_pre', Fire == 'Lionshead') %>% dplyr::select('Stack') %>% pull()),
+  rast(rast(df.img %>% filter(Year == '2020_pre', Fire == 'Lionshead') %>% dplyr::select('Stack') %>% pull(), lyrs=1), val=3) %>% categories(value=data.frame(id=3, fire='Lionshead'))
+  ) %>% terra::subset(c('NIR', 'NDVI', 'GNDVI', 'BRGHT', 'SDB', 'fire'))
+
+# Lionshead
+terra::predict(lh.stack.0, brt.mdl.comb, fun=predict_brt_terra, cores=1, filename=here('forest_cover_normal/Lionshead_ForestCover_BRT_2020_Prefire.tif'))
+gc()
+gc()
+
+remove(lh.stack.0)
+gc()
+```
+
+
+```{r}
+##### Holiday Farm ################################################################
+hf.stack.0 <- c(
+  rast(df.img %>% filter(Year == '2020_pre', Fire == 'HolidayFarm') %>% dplyr::select('Stack') %>% pull()),
+  rast(rast(df.img %>% filter(Year == '2020_pre', Fire == 'HolidayFarm') %>% dplyr::select('Stack') %>% pull(), lyrs=1), val=4) %>% categories(value=data.frame(id=4, fire='HolidayFarm'))
+  ) %>% terra::subset(c('NIR', 'NDVI', 'GNDVI', 'BRGHT', 'SDB', 'fire'))
+
+# Holiday Farm
+terra::predict(hf.stack.0, brt.mdl.comb, fun=predict_brt_terra, cores=1, filename=here('forest_cover_normal/HolidayFarm_ForestCover_BRT_2020_Prefire.tif'))
+gc()
+gc()
+
+remove(hf.stack.0)
+gc()
+```
+
+
+```{r}
+##### Archie Creek ################################################################
+ac.stack.0 <- c(
+  rast(df.img %>% filter(Year == '2020_pre', Fire == 'ArchieCreek') %>% dplyr::select('Stack') %>% pull()),
+  rast(rast(df.img %>% filter(Year == '2020_pre', Fire == 'ArchieCreek') %>% dplyr::select('Stack') %>% pull(), lyrs=1), val=5) %>% categories(value=data.frame(id=5, fire='ArchieCreek'))
+  ) %>% terra::subset(c('NIR', 'NDVI', 'GNDVI', 'BRGHT', 'SDB', 'fire'))
+
+# Archie Creek
+terra::predict(ac.stack.0, brt.mdl.comb, fun=predict_brt_terra, cores=1, filename=here('forest_cover_normal/ArchieCreek_ForestCover_BRT_2020_Prefire.tif'))
+gc()
+gc()
+
+remove(ac.stack.0)
+gc()
+```
+
+
+FIN

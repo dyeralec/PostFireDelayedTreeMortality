@@ -1,0 +1,81 @@
+---
+title: "Fire Sensitivity"
+author: "Alec Dyer"
+date: "October 20, 2024"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Libraries & Data
+
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+load('fire_data_filtered_qmd_v3.Rdata')
+```
+
+# FOFEM
+
+>=0.75 FOFEM_PMORT as sensitive, <0.75 to >0.25 as tolerant, and < 0.25 as resistant
+
+```{r}
+fofem_qmd <- read_csv('FOFEM_DIACLASS.csv') %>% select(c('SPECIES_ABV', 'DIACLASS', 'FOFEM_PMORT_6FT_SFL'))
+```
+
+```{r}
+df.fires.traits <- df.fires.traits %>%
+  mutate(qmd = qmd / 10) %>% # scale
+  mutate(qmd_in = qmd / 2.54) # to inches
+```
+
+```{r}
+# Match FOFEM values based on species and diameter (inches)
+df.fires.traits.fofem <- df.fires.traits %>%
+  mutate(DIACLASS = ifelse(qmd_in >= 20, '>20', '')) %>%
+  mutate(DIACLASS = ifelse(qmd_in < 20, '10TO20', DIACLASS)) %>%
+  mutate(DIACLASS = ifelse(qmd_in < 10, '1TO10', DIACLASS)) %>%
+  merge(fofem_qmd, by.x=c("fortypba", "DIACLASS"), by.y=c("SPECIES_ABV", "DIACLASS")) %>%
+  mutate(sensitivity_fofem = cut(FOFEM_PMORT_6FT_SFL, breaks=c(0, 0.25, 0.75, Inf), labels=c('Resistant', 'Tolerant', 'Sensitive'))) %>%
+  mutate(sensitivity_fofem = factor(sensitivity_fofem, levels=c('Sensitive', 'Tolerant', 'Resistant'))) %>%
+  mutate(mortality = factor(mortality, levels=c('First-order','Delayed','Survived')))
+```
+
+
+```{r fig.width=5, fig.height=2}
+df.fires.traits.fofem %>%
+  filter(rdnbr > 0) %>%
+  mutate(age_class = cut(age, breaks=c(-1, 80, 160, Inf), labels=c('Young', 'Adult', 'Mature'))) %>%
+  group_by(sensitivity_fofem, age_class, mortality) %>%
+  summarise(count=n()) %>%
+  mutate(perc = count/sum(count)*100) %>%
+  ggplot(aes(x=perc, y=age_class, fill=mortality)) +
+    geom_bar(stat='identity', position='dodge', width=0.5, color='black') +
+    scale_fill_manual(values=c('#E1E1E1', '#ff7f00', '#267300')) +
+    ylab('Sensitivity Class') + 
+    xlab('Percentage (%)') +
+    theme_cowplot() +
+    theme(
+        axis.text.x=element_text(size=10),
+        axis.text.y = element_text( size = 10 ),
+        axis.title = element_text( size = 12),
+        strip.text = element_text(size = 10),
+        legend.position="bottom",
+        legend.justification = "center"
+      ) + 
+    guides(fill=guide_legend(title="")) +
+    facet_wrap(~sensitivity_fofem)
+
+ggsave2('figures/change_by_firetrait_ageclass_rdnbr0_fofem.png')
+```
+
+
+
+
+
+
+
+

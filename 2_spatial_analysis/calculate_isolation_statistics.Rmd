@@ -1,0 +1,80 @@
+---
+title: "Isolation Statistics at High Severity"
+author: "Alec Dyer"
+date: "November 23, 2024"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = 'center')
+options(scipen=999)
+```
+
+# Libraries
+
+```{r message=F, include=F}
+library(dplyr)
+library(tidyverse)
+```
+
+# Globals
+
+```{r}
+fires <- c('riverside', 'beachiecreek', 'lionshead', 'holidayfarm', 'archiecreek') # 
+wk.dir <- '..04_SpatialAnalysis/Isolation_HPC/'
+fc.dir <- '..ForestCover_BRT_Normal_Masked_v3/'
+
+fire.lookup <- c('riverside'='riverside', 'beachiecreek'='beachie_creek', 'lionshead'='lionshead', 'holidayfarm'='holiday_farm', 'archiecreek'='archie_creek')
+fire.lookup.cap <- c('riverside'='Riverside', 'beachiecreek'='BeachieCreek', 'lionshead'='Lionshead', 'holidayfarm'='HolidayFarm', 'archiecreek'='ArchieCreek')
+
+# function to scale from 0 to 1
+scale01<- function(x){(x-min(x))/(max(x)-min(x))}
+```
+
+
+# Calculate Isolation Statistics
+
+```{r}
+rv.df.d <- read.csv('dist_stats_masked_highsev_riverside.csv')
+bc.df.d <- read.csv('dist_stats_masked_highsev_beachiecreek.csv')
+lh.df.d <- read.csv('dist_stats_masked_highsev_lionshead.csv')
+hf.df.d <- read.csv('dist_stats_masked_highsev_holidayfarm.csv')
+ac.df.d <- read.csv('dist_stats_masked_highsev_archiecreek.csv')
+```
+
+```{r}
+rv.df.d2wd <- read.csv('d2wd_stats_masked_highsev_riverside.csv')
+bc.df.d2wd <- read.csv('d2wd_stats_masked_highsev_beachiecreek.csv')
+lh.df.d2wd <- read.csv('d2wd_stats_masked_highsev_lionshead.csv')
+hf.df.d2wd <- read.csv('d2wd_stats_masked_highsev_holidayfarm.csv')
+ac.df.d2wd <- read.csv('d2wd_stats_masked_highsev_archiecreek.csv')
+```
+
+
+```{r}
+(d.total <- bind_rows(rv.df.d, bc.df.d, lh.df.d, hf.df.d, ac.df.d) %>%
+  group_by(distclass, year) %>% 
+  arrange(year, .by_group = TRUE) %>%
+  summarise(n=sum(n()), area = sum(area)) %>%
+  mutate(pct_change = (area-lag(area))/lag(area) * 100)) %>%
+  group_by(year) %>%
+  mutate(perc_area = area / sum(area))
+```
+
+
+```{r}
+(d2wd.total <- bind_rows(rv.df.d2wd, bc.df.d2wd, lh.df.d2wd, hf.df.d2wd, ac.df.d2wd) %>% 
+  group_by(d2wdclass, year) %>% 
+  arrange(year, .by_group = TRUE) %>%
+  summarise(n=sum(n()), area = sum(area)) %>%
+  mutate(pct_change = (area-lag(area))/lag(area) * 100)) %>%
+  group_by(year) %>%
+  mutate(perc_area = area / sum(area))
+
+(df.total <- bind_rows(d.total,d2wd.total)) 
+
+write.csv(df.total, 'isolation_highsev_stats.csv')
+```
+
