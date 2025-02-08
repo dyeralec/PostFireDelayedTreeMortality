@@ -1,7 +1,7 @@
 # PostFireDelayedTreeMortality
-This repository stores the source code and select spatial data utilized in Dyer et al. (in review) for data processing and analysis.
+This repository stores the source code and select spatial data utilized to assess the spatiotemporal patterns of post-fire delayed tree mortality in temperate rainforests (Dyer et al. in review).
 
-Dyer AS, Busby S, Evers C, Reilly M, Zuspan A, Holz A (2025). Ecological implications of post-fire delayed tree mortality following high severity wildfires in temperate rainforests.
+Dyer AS, Busby S, Evers C, Reilly M, Zuspan A, Holz A (in review). Ecological implications of post-fire delayed tree mortality following high severity wildfires in temperate rainforests.
 
 Please note that imagery data and derivative products are not included in this repository due to source licensing and large data sizes. Refer to Dyer et al. (in review) for information regarding imagery sources and indices.
 
